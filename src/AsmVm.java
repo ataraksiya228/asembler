@@ -87,6 +87,7 @@ public class AsmVm {
             for (byte[] b : encoded) os.write(b);
         }
         System.out.println("Assembled " + encoded.size() + " instructions to " + out);
+        System.out.println("Размер двоичного файла: " + encoded.size() * 5 + " байт");
     }
 
     static byte[] to5BytesLE(long word) {
