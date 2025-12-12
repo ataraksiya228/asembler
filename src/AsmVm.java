@@ -1,6 +1,7 @@
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.stream.*;
 
 public class AsmVm {
     static final int MEMORY_SIZE = 1024; // увеличим память
@@ -11,6 +12,10 @@ public class AsmVm {
         if ("assemble".equals(cmd)) {
             if (args.length != 3) { usage(); return; }
             assemble(Paths.get(args[1]), Paths.get(args[2]));
+        } else if ("run".equals(cmd)) {
+            if (args.length != 2 && args.length != 3) { usage(); return; }
+            Path dumpPath = (args.length == 3) ? Paths.get(args[2]) : null;
+            runProgram(Paths.get(args[1]), dumpPath);
         } else {
             usage();
         }
@@ -87,7 +92,7 @@ public class AsmVm {
             for (byte[] b : encoded) os.write(b);
         }
         System.out.println("Assembled " + encoded.size() + " instructions to " + out);
-        System.out.println("Размер двоичного файла: " + encoded.size() * 5 + " байт");
+        System.out.println("Размер двоичного файла: " + encoded.size() * 5 + " байт");
     }
 
     static byte[] to5BytesLE(long word) {
@@ -96,5 +101,64 @@ public class AsmVm {
             b[i] = (byte)((word >> (8*i)) & 0xFF);
         }
         return b;
+    }
+
+    // ---------- Interpreter ----------
+    static void runProgram(Path bin, Path dumpPath) throws IOException {
+        byte[] all = Files.readAllBytes(bin);
+        if (all.length % 5 != 0) throw new IOException("Program must be multiple of 5 bytes");
+        int instrCount = all.length / 5;
+        int[] memory = new int[MEMORY_SIZE];
+
+        for (int i = 0; i < instrCount; i++) {
+            long word = 0;
+            for (int b = 0; b < 5; b++) {
+                word |= ((long)(all[i*5 + b] & 0xFF)) << (8*b);
+            }
+            int opcode = (int)(word & 0xF);
+            switch (opcode) {
+                case 2: { // load
+                    int addr = (int)((word >> 4) & 0x3F);
+                    int constant = (int)((word >> 10) & 0x7FF);
+                    memory[addr] = constant;
+                    System.out.println(">>> LOAD: memory slot " + addr + " set to " + constant);
+                    break;
+                }
+                case 11: { // read
+                    int addr1 = (int)((word >> 4) & 0x3F);
+                    int addr2 = (int)((word >> 10) & 0x3F);
+                    int offset = (int)((word >> 16) & 0x7FF);
+                    memory[addr1] = memory[addr2 + offset];
+                    System.out.printf("[READ] Cell %d now has value %d (from cell %d & %d)%n", addr1, memory[addr1], addr2, offset);
+                    break;
+                }
+                case 3: { // write
+                    int addr1 = (int)((word >> 4) & 0x3F);
+                    int addr2 = (int)((word >> 10) & 0x3F);
+                    int offset = (int)((word >> 16) & 0x7FF);
+                    memory[addr1] = memory[addr2 + offset];
+                    System.out.println("Writing to cell " + addr1 + ": " + memory[addr1] + " (source " + addr2 + " + offset " + offset + ")");
+                    break;
+                }
+                default:
+                    throw new IOException("Encountered unknown opcode: " + opcode);
+            }
+        }
+        System.out.println("Memory slots: ");
+        for (int i = 0; i < memory.length; i++) {
+            if (memory[i] != 0)
+                System.out.println("Memory[" + i + "] = " + memory[i]);
+        }
+        if (dumpPath != null) dumpMemoryCSV(memory, dumpPath);
+    }
+
+    static void dumpMemoryCSV(int[] memory, Path file) throws IOException {
+        try (BufferedWriter writer = Files.newBufferedWriter(file)) {
+            writer.write("Address,Value\n");
+            for (int i = 0; i < memory.length; i++) {
+                if (memory[i] != 0) writer.write(i + "," + memory[i] + "\n");
+            }
+        }
+        System.out.println("Memory dumped to CSV: " + file);
     }
 }
